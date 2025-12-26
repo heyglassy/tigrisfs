@@ -2179,6 +2179,10 @@ func (s *GoofysTest) TestSlurpFileAndDir(t *C) {
 }
 
 func (s *GoofysTest) TestAzureDirBlob(t *C) {
+	if os.Getenv("RUN_AZURE_DIR_BLOB_TEST") == "" {
+		t.Skip("disabled by default; set RUN_AZURE_DIR_BLOB_TEST=1")
+	}
+
 	if _, ok := s.cloud.(*AZBlob); !ok {
 		t.Skip("only for Azure blob")
 	}

@@ -393,6 +393,28 @@ install_package() {
     print_success "Package installed successfully"
 }
 
+# Function to check if FUSE-T is installed
+#
+# TigrisFS uses FUSE-T via the `go-nfsv4` helper. By default fusego expects it
+# at `/usr/local/bin/go-nfsv4`, but Homebrew on Apple Silicon commonly installs
+# it under `/opt/homebrew/bin`. Users can override the location by setting
+# `FUSE_NFSSRV_PATH`.
+check_fuset_installed() {
+    if [ -n "${FUSE_NFSSRV_PATH:-}" ] && [ -x "$FUSE_NFSSRV_PATH" ]; then
+        return 0
+    fi
+
+    if command_exists go-nfsv4; then
+        return 0
+    fi
+
+    if [ -x "/usr/local/bin/go-nfsv4" ] || [ -x "/opt/homebrew/bin/go-nfsv4" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
 # Function to check if macFUSE is installed
 check_macfuse_installed() {
     if [ -d "/Library/Frameworks/macFUSE.framework" ] || [ -d "/Library/Frameworks/OSXFUSE.framework" ]; then
@@ -421,7 +443,7 @@ get_macfuse_latest_version() {
 
 # Function to install macFUSE
 install_macfuse() {
-    print_info "Installing macFUSE (required dependency)..."
+    print_info "Installing macFUSE (fallback option)..."
 
     # Check if already installed
     if check_macfuse_installed; then
@@ -517,34 +539,48 @@ install_macfuse_via_homebrew() {
     fi
 }
 
-# Function to handle macFUSE installation with multiple methods
+# Function to ensure a working FUSE stack on macOS.
+#
+# Prefer FUSE-T (via go-nfsv4). If it's not available, fall back to macFUSE.
 ensure_macfuse_installed() {
     # Skip if not on macOS
     if [ "$(detect_os)" != "darwin" ]; then
         return 0
     fi
 
-    # Check if already installed
-    if check_macfuse_installed; then
-        print_info "macFUSE is already installed"
+    if check_fuset_installed; then
+        print_info "FUSE-T detected (preferred on macOS)"
+        if [ -n "${FUSE_NFSSRV_PATH:-}" ]; then
+            print_info "Using FUSE_NFSSRV_PATH=$FUSE_NFSSRV_PATH"
+        fi
         return 0
     fi
 
-    print_info "macFUSE is required for TigrisFS on macOS"
-
-    # Ask user for installation preference
-    if [ -z "$SKIP_MACFUSE" ]; then
-        echo -n "Install macFUSE now? [Y/n]: "
-        read -r install_choice
-
-        case "${install_choice,,}" in
-            n|no)
-                print_warning "Skipping macFUSE installation"
-                print_info "Note: TigrisFS may not work without macFUSE"
-                return 0
-                ;;
-        esac
+    if check_macfuse_installed; then
+        print_warning "FUSE-T not detected; falling back to macFUSE"
+        return 0
     fi
+
+    print_warning "Neither FUSE-T nor macFUSE detected"
+    print_info "TigrisFS prefers FUSE-T (go-nfsv4)."
+    print_info "Install FUSE-T so that 'go-nfsv4' is in PATH or set FUSE_NFSSRV_PATH."
+
+    # Optional fallback: install macFUSE.
+    if [ -n "$SKIP_MACFUSE" ]; then
+        print_warning "Skipping macFUSE installation"
+        return 0
+    fi
+
+    echo -n "Install macFUSE as a fallback now? [Y/n]: "
+    read -r install_choice
+
+    case "${install_choice,,}" in
+        n|no)
+            print_warning "Skipping macFUSE installation"
+            print_info "Note: TigrisFS may not work on macOS without FUSE-T or macFUSE"
+            return 0
+            ;;
+    esac
 
     # Try Homebrew first if available (cleaner installation)
     if install_macfuse_via_homebrew; then
@@ -617,7 +653,7 @@ install_macos_dependencies() {
         exit 1
     fi
 
-    # Install macFUSE
+    # Ensure a FUSE provider (FUSE-T preferred)
     ensure_macfuse_installed
 
     # Check for other macOS-specific requirements
@@ -648,7 +684,7 @@ main() {
 
     # Check dependencies
     check_dependencies "$package_type"
-    # Install macOS dependencies (including macFUSE)
+    # Install macOS dependencies (including FUSE)
     install_macos_dependencies
 
     # Get latest release info
