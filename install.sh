@@ -415,201 +415,71 @@ check_fuset_installed() {
     return 1
 }
 
-# Function to check if macFUSE is installed
-check_macfuse_installed() {
-    if [ -d "/Library/Frameworks/macFUSE.framework" ] || [ -d "/Library/Frameworks/OSXFUSE.framework" ]; then
-        return 0  # Already installed
-    fi
-    return 1  # Not installed
-}
-
-# Function to get latest macFUSE version
-get_macfuse_latest_version() {
-    local api_url="https://api.github.com/repos/osxfuse/osxfuse/releases/latest"
-    local temp_file
-    temp_file=$(mktemp)
-
-    if download_file "$api_url" "$temp_file"; then
-        local version
-        version=$(jq -r '.tag_name' "$temp_file" 2>/dev/null)
-        rm -f "$temp_file"
-        echo "$version"
-    else
-        rm -f "$temp_file"
-        # Fallback to a known stable version
-        echo "macfuse-4.4.3"
-    fi
-}
-
-# Function to install macFUSE
-install_macfuse() {
-    print_info "Installing macFUSE (fallback option)..."
-
-    # Check if already installed
-    if check_macfuse_installed; then
-        print_success "macFUSE is already installed"
-        return 0
-    fi
-
-    local temp_dir
-    temp_dir=$(mktemp -d)
-
-    # Cleanup function for macFUSE installation
-    cleanup_macfuse() {
-        rm -rf "$temp_dir"
-    }
-    trap cleanup_macfuse EXIT
-
-    # Get latest version
-    local version
-    version=$(get_macfuse_latest_version)
-    print_info "Installing macFUSE version: $version"
-
-    # Download macFUSE
-    local macfuse_url="https://github.com/osxfuse/osxfuse/releases/download/$version/$version.dmg"
-    local dmg_file="$temp_dir/macfuse.dmg"
-
-    print_info "Downloading macFUSE..."
-    if ! download_file "$macfuse_url" "$dmg_file"; then
-        print_error "Failed to download macFUSE"
-        return 1
-    fi
-
-    # Mount the DMG
-    print_info "Mounting macFUSE installer..."
-    local mount_point="/Volumes/macFUSE"
-    if ! hdiutil attach "$dmg_file" -quiet -mountpoint "$mount_point"; then
-        print_error "Failed to mount macFUSE DMG"
-        return 1
-    fi
-
-    # Find the installer package
-    local pkg_file
-    pkg_file=$(find "$mount_point" -name "*.pkg" | head -n1)
-
-    if [ -z "$pkg_file" ]; then
-        print_error "macFUSE installer package not found"
-        hdiutil detach "$mount_point" -quiet
-        return 1
-    fi
-
-    # Install the package
-    print_info "Installing macFUSE package (requires admin password)..."
-    if sudo installer -pkg "$pkg_file" -target /; then
-        print_success "macFUSE installed successfully"
-
-        # Unmount the DMG
-        hdiutil detach "$mount_point" -quiet
-
-        # Check if installation was successful
-        if check_macfuse_installed; then
-            print_success "macFUSE installation verified"
-            return 0
-        else
-            print_warning "macFUSE installation may require a reboot to complete"
-            return 0
-        fi
-    else
-        print_error "Failed to install macFUSE package"
-        hdiutil detach "$mount_point" -quiet
-        return 1
-    fi
-}
-
-# Alternative: Install via Homebrew if available
-install_macfuse_via_homebrew() {
+# Function to install FUSE-T via Homebrew
+install_fuset_via_homebrew() {
     if ! command_exists brew; then
         return 1  # Homebrew not available
     fi
 
-    print_info "Installing macFUSE via Homebrew..."
+    print_info "Installing FUSE-T via Homebrew..."
 
-    # Add the cask tap if not already added
-    if ! brew tap | grep -q "homebrew/cask"; then
-        brew tap homebrew/cask
-    fi
-
-    # Install macFUSE
-    if brew install --cask macfuse; then
-        print_success "macFUSE installed via Homebrew"
+    if brew install macos-fuse-t/homebrew-cask/fuse-t; then
+        print_success "FUSE-T installed via Homebrew"
         return 0
     else
-        print_warning "Failed to install macFUSE via Homebrew"
+        print_warning "Failed to install FUSE-T via Homebrew"
         return 1
     fi
 }
 
-# Function to ensure a working FUSE stack on macOS.
-#
-# Prefer FUSE-T (via go-nfsv4). If it's not available, fall back to macFUSE.
-ensure_macfuse_installed() {
+# Function to ensure FUSE-T is installed on macOS
+ensure_fuset_installed() {
     # Skip if not on macOS
     if [ "$(detect_os)" != "darwin" ]; then
         return 0
     fi
 
     if check_fuset_installed; then
-        print_info "FUSE-T detected (preferred on macOS)"
+        print_success "FUSE-T detected"
         if [ -n "${FUSE_NFSSRV_PATH:-}" ]; then
             print_info "Using FUSE_NFSSRV_PATH=$FUSE_NFSSRV_PATH"
         fi
         return 0
     fi
 
-    if check_macfuse_installed; then
-        print_warning "FUSE-T not detected; falling back to macFUSE"
-        return 0
-    fi
-
-    print_warning "Neither FUSE-T nor macFUSE detected"
-    print_info "TigrisFS prefers FUSE-T (go-nfsv4)."
+    print_warning "FUSE-T not detected"
+    print_info "TigrisFS requires FUSE-T (go-nfsv4) on macOS."
     print_info "Install FUSE-T so that 'go-nfsv4' is in PATH or set FUSE_NFSSRV_PATH."
 
-    # Optional fallback: install macFUSE.
-    if [ -n "$SKIP_MACFUSE" ]; then
-        print_warning "Skipping macFUSE installation"
-        return 0
+    if [ -n "$SKIP_FUSET" ]; then
+        print_warning "Skipping FUSE-T installation"
+        print_error "TigrisFS will not work on macOS without FUSE-T"
+        return 1
     fi
 
-    echo -n "Install macFUSE as a fallback now? [Y/n]: "
+    echo -n "Install FUSE-T now? [Y/n]: "
     read -r install_choice
 
     case "${install_choice,,}" in
         n|no)
-            print_warning "Skipping macFUSE installation"
-            print_info "Note: TigrisFS may not work on macOS without FUSE-T or macFUSE"
-            return 0
+            print_warning "Skipping FUSE-T installation"
+            print_error "TigrisFS requires FUSE-T on macOS"
+            print_info "Install FUSE-T manually: brew install macos-fuse-t/homebrew-cask/fuse-t"
+            return 1
             ;;
     esac
 
-    # Try Homebrew first if available (cleaner installation)
-    if install_macfuse_via_homebrew; then
+    # Try Homebrew installation
+    if install_fuset_via_homebrew; then
         return 0
     fi
 
-    # Fall back to direct installation
-    print_info "Homebrew not available or failed, using direct installation..."
-    if install_macfuse; then
-        return 0
-    fi
+    print_error "Failed to install FUSE-T"
+    print_info "Please install FUSE-T manually:"
+    print_info "  brew install macos-fuse-t/homebrew-cask/fuse-t"
+    print_info "Or visit: https://github.com/macos-fuse-t/fuse-t"
 
-    print_error "Failed to install macFUSE"
-    print_info "Please install macFUSE manually from: https://osxfuse.github.io/"
-
-    # Ask if user wants to continue without macFUSE
-    echo -n "Continue TigrisFS installation anyway? [y/N]: "
-    read -r continue_choice
-
-    case "${continue_choice,,}" in
-        y|yes)
-            print_warning "Continuing without macFUSE - TigrisFS may not function properly"
-            return 0
-            ;;
-        *)
-            print_info "Installation aborted"
-            exit 1
-            ;;
-    esac
+    return 1
 }
 
 # Function to check macOS version compatibility
@@ -619,23 +489,12 @@ check_macos_compatibility() {
     local major_version
     major_version=$(echo "$macos_version" | cut -d. -f1)
 
-    # macFUSE requires macOS 10.9 or later
-    if [ "$major_version" -lt 10 ]; then
-        print_error "macOS version $macos_version is too old for macFUSE"
+    # FUSE-T requires macOS 11 (Big Sur) or later
+    if [ "$major_version" -lt 11 ]; then
+        print_error "macOS version $macos_version is too old for FUSE-T"
+        print_error "FUSE-T requires macOS 11 (Big Sur) or later"
         return 1
     fi
-
-    # Check for specific version requirements
-    case "$major_version" in
-        10)
-            local minor_version
-            minor_version=$(echo "$macos_version" | cut -d. -f2)
-            if [ "$minor_version" -lt 9 ]; then
-                print_error "macOS 10.9 or later is required for macFUSE"
-                return 1
-            fi
-            ;;
-    esac
 
     return 0
 }
@@ -653,18 +512,14 @@ install_macos_dependencies() {
         exit 1
     fi
 
-    # Ensure a FUSE provider (FUSE-T preferred)
-    ensure_macfuse_installed
+    # Ensure FUSE-T is installed
+    if ! ensure_fuset_installed; then
+        exit 1
+    fi
 
     # Check for other macOS-specific requirements
     if ! command_exists pkgutil; then
         print_warning "pkgutil not found - some features may not work"
-    fi
-
-    # Inform about security settings
-    if check_macfuse_installed; then
-        print_info "Note: You may need to allow macFUSE in System Preferences > Security & Privacy"
-        print_info "after the first run if prompted by macOS"
     fi
 }
 
@@ -912,8 +767,8 @@ while [[ $# -gt 0 ]]; do
             esac
             shift 2
             ;;
-        --skip-macfuse)
-            SKIP_MACFUSE=1
+        --skip-fuset)
+            SKIP_FUSET=1
             shift
             ;;
         *)

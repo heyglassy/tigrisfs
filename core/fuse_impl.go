@@ -5,7 +5,6 @@ package core
 import (
 	"os"
 	"os/exec"
-	"runtime"
 
 	"github.com/jacobsa/fuse"
 )
@@ -43,35 +42,9 @@ func isFuseTInstalled() bool {
 	return false
 }
 
-func isMacFUSEInstalled() bool {
-	for _, p := range []string{
-		"/Library/Frameworks/macFUSE.framework",
-		"/Library/Frameworks/OSXFUSE.framework",
-		"/Library/Filesystems/macfuse.fs",
-		"/Library/Filesystems/osxfuse.fs",
-	} {
-		if fileExists(p) {
-			return true
-		}
-	}
-
-	return false
-}
-
 func preferredFuseImpl() fuse.FUSEImpl {
-	// Only relevant on macOS; other platforms ignore this config.
-	if runtime.GOOS != "darwin" {
-		return fuse.FUSEImplFuseT
-	}
-
-	if isFuseTInstalled() {
-		return fuse.FUSEImplFuseT
-	}
-
-	// if isMacFUSEInstalled() {
-	// 	return fuse.FUSEImplMacFUSE
-	// }
-
-	// Default to Fuse-T so the error message is actionable.
+	// Always use FUSE-T. The function still exists to detect and set
+	// FUSE_NFSSRV_PATH if go-nfsv4 is found in non-standard locations.
+	isFuseTInstalled()
 	return fuse.FUSEImplFuseT
 }
